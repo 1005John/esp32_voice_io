@@ -1,0 +1,23 @@
+# Arduino build artifacts
+esp32/build-*/
+esp32/*/build/
+*.elf
+*.bin
+*.map
+
+# Secrets (never commit API keys / Wi-Fi)
+esp32/secrets.h
+secrets.h
+
+# Python
+pc-agent/__pycache__/
+pc-agent/*.pyc
+pc-agent/.venv/
+pc-agent/venv/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/

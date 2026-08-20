@@ -1,0 +1,5 @@
+# The PC agent uses only the Python 3 standard library (http.server, ctypes,
+# urllib, json). No third-party packages are required on macOS.
+#
+# Windows will later use comtypes for SendInput; install it there:
+#   pip install comtypes

@@ -71,8 +71,10 @@ constexpr size_t MAX_RECORD_BYTES = MIC_SAMPLE_RATE * (MIC_BITS / 8) * MAX_RECOR
 constexpr uint32_t MIN_RECORD_BYTES = MIC_SAMPLE_RATE * (MIC_BITS / 8) / 3;
 constexpr uint32_t DEBOUNCE_MS = 35, WIFI_RETRY_MS = 10000;
 constexpr size_t SPEAKER_FRAMES_PER_WRITE = 512;
-constexpr uint8_t SPEAKER_VOLUME_PERCENT = 70;
-constexpr size_t MAX_B64_LINE = 16384;
+constexpr uint8_t SPEAKER_VOLUME_PERCENT = 25;
+// Cap for downloaded TTS PCM (kept in PSRAM, played after Wi-Fi is paused).
+constexpr size_t MAX_REPLY_AUDIO_BYTES = 2 * 1024 * 1024;
+constexpr size_t MAX_B64_LINE = 65536;
 
 Preferences preferences;
 uint8_t* recordingBuffer = nullptr;
@@ -312,6 +314,7 @@ void uploadAsrAndForward() {
 
   if (!readResponseHeaders(tls)) { Serial.println("[vio] ASR HTTP error"); tls.stop(); return; }
   String line;
+  line.reserve(MAX_B64_LINE);
   size_t forwarded = 0;
   const uint32_t deadline = millis() + 60000;
   while ((tls.connected() || tls.available()) && static_cast<int32_t>(deadline - millis()) > 0) {
@@ -337,33 +340,8 @@ void uploadAsrAndForward() {
   Serial.printf("[vio] ASR done; forwarded %u deltas\n", (unsigned)forwarded);
 }
 
-void playTtsChunk(const String& b64) {
-  if (b64.length() == 0) return;
-  ensureSpeaker();
-  const size_t pcmCap = b64.length() * 3 / 4 + 4;
-  uint8_t* pcm = static_cast<uint8_t*>(ps_malloc(pcmCap));
-  if (!pcm) { Serial.println("[vio] tts pcm alloc failed"); return; }
-  size_t pcmLen = 0;
-  if (mbedtls_base64_decode(pcm, pcmCap, &pcmLen,
-      reinterpret_cast<const unsigned char*>(b64.c_str()), b64.length()) != 0) {
-    free(pcm); Serial.println("[vio] tts decode failed"); return;
-  }
-  const size_t frames = pcmLen / 2;
-  const int16_t* src = reinterpret_cast<const int16_t*>(pcm);
-  size_t off = 0;
-  while (off < frames) {
-    const size_t n = min(static_cast<size_t>(SPEAKER_FRAMES_PER_WRITE), frames - off);
-    for (size_t i = 0; i < n; ++i) {
-      const int16_t s = speakerSample(src[off + i]);
-      speakerStereo[i * 2] = s;
-      speakerStereo[i * 2 + 1] = s;
-    }
-    if (!writeSpeakerFrames(n)) break;
-    off += n;
-  }
-  free(pcm);
-}
-
+// Decode every TTS audio chunk to PSRAM; Wi-Fi is paused during playback to
+// avoid the USB brownout that happens when Wi-Fi RX and the I2S amp run together.
 void playTts(const String& text) {
   if (text.length() == 0) return;
   if (mimoKey.length() == 0) { Serial.println("[vio] MiMo key missing"); return; }
@@ -384,11 +362,12 @@ void playTts(const String& text) {
   if (!readResponseHeaders(tls)) { Serial.println("[vio] TTS HTTP error"); tls.stop(); return; }
   Serial.printf("[vio] TTS streaming %u chars\n", (unsigned)text.length());
 
-  ensureSpeaker();
-  playingTts = true;
-  updateLed();
-  String line;
+  uint8_t* reply = static_cast<uint8_t*>(ps_malloc(MAX_REPLY_AUDIO_BYTES));
+  if (!reply) { Serial.println("[vio] tts reply alloc failed"); tls.stop(); return; }
+  size_t replyLen = 0;
   size_t chunks = 0;
+  String line;
+  line.reserve(MAX_B64_LINE);
   const uint32_t deadline = millis() + 90000;
   bool done = false;
   while ((tls.connected() || tls.available()) && static_cast<int32_t>(deadline - millis()) > 0 && !done) {
@@ -400,7 +379,22 @@ void playTts(const String& text) {
           if (payload == "[DONE]") { done = true; }
           else {
             const String audio = jsonStringField(payload, "data");
-            if (audio.length()) { playTtsChunk(audio); ++chunks; }
+            if (audio.length()) {
+              const size_t pcmCap = audio.length() * 3 / 4 + 4;
+              uint8_t* pcm = static_cast<uint8_t*>(ps_malloc(pcmCap));
+              if (pcm) {
+                size_t pcmLen = 0;
+                if (mbedtls_base64_decode(pcm, pcmCap, &pcmLen,
+                    reinterpret_cast<const unsigned char*>(audio.c_str()), audio.length()) == 0 && pcmLen > 0) {
+                  if (replyLen + pcmLen <= MAX_REPLY_AUDIO_BYTES) {
+                    memcpy(reply + replyLen, pcm, pcmLen);
+                    replyLen += pcmLen;
+                    ++chunks;
+                  }
+                }
+                free(pcm);
+              }
+            }
           }
         }
         line = "";
@@ -411,12 +405,39 @@ void playTts(const String& text) {
     }
     delay(1);
   }
+  tls.stop();
+  Serial.printf("[vio] TTS downloaded %u chunks / %u bytes; pausing Wi-Fi\n",
+                (unsigned)chunks, (unsigned)replyLen);
+  if (replyLen == 0) { free(reply); Serial.println("[vio] no TTS audio"); return; }
+
+  WiFi.mode(WIFI_OFF);
+  updateLed();
+  delay(250);
+  ensureSpeaker();
+  playingTts = true;
+  updateLed();
+  const int16_t* src = reinterpret_cast<const int16_t*>(reply);
+  const size_t frames = replyLen / 2;
+  size_t off = 0;
+  while (off < frames) {
+    const size_t n = min(static_cast<size_t>(SPEAKER_FRAMES_PER_WRITE), frames - off);
+    for (size_t i = 0; i < n; ++i) {
+      const int16_t s = speakerSample(src[off + i]);
+      speakerStereo[i * 2] = s;
+      speakerStereo[i * 2 + 1] = s;
+    }
+    if (!writeSpeakerFrames(n)) break;
+    off += n;
+  }
   delay(180);
   i2s_zero_dma_buffer(SPEAKER_PORT);
-  tls.stop();
   playingTts = false;
+  const size_t played = off * 2;
+  free(reply);
+  WiFi.mode(WIFI_STA);
+  connectWifi();
   updateLed();
-  Serial.printf("[vio] TTS done; played %u chunks\n", (unsigned)chunks);
+  Serial.printf("[vio] TTS done; played %u/%u bytes\n", (unsigned)played, (unsigned)replyLen);
 }
 
 void asrTask(void*) { uploadAsrAndForward(); voiceJobActive = false; asrUploading = false; updateLed(); vTaskDelete(nullptr); }
@@ -563,7 +584,7 @@ void setup() {
   server.on("/health", HTTP_GET, handleHealth);
   server.onNotFound([]() { server.send(404, "application/json", "{\"ok\":false}"); });
   server.begin();
-  Serial.printf("[vio] ready; max recording=%us, http port=%u\n", MAX_RECORD_SECONDS, DEVICE_HTTP_PORT);
+  Serial.printf("[vio] ready; max recording=%us, http port=%u, reset=%d\n", MAX_RECORD_SECONDS, DEVICE_HTTP_PORT, (int)esp_reset_reason());
   printStatus();
 }
 

@@ -51,7 +51,8 @@
 #define DEVICE_HTTP_PORT 8766
 #endif
 
-#define Serial Serial0
+// Serial defaults to USB CDC (CDCOnBoot=cdc). Use the right USB-C port for
+// the console; the left "COM" CH340 port (UART0 GPIO44/43) is left free.
 
 namespace {
 
@@ -240,7 +241,11 @@ bool readResponseHeaders(WiFiClient& c, uint32_t timeoutMs = 15000) {
     while (c.available() && static_cast<int32_t>(deadline - millis()) > 0) {
       const char ch = static_cast<char>(c.read());
       h += ch;
-      if (h.endsWith("\r\n\r\n")) return h.startsWith("HTTP/1.1 2") || h.startsWith("HTTP/1.0 2");
+      if (h.endsWith("\r\n\r\n")) {
+        const bool ok = h.startsWith("HTTP/1.1 2") || h.startsWith("HTTP/1.0 2");
+        if (!ok) Serial.printf("[vio] HTTP resp: %.180s\n", h.c_str());
+        return ok;
+      }
       if (h.length() > 4096) return false;
     }
     if (!c.connected()) break;
@@ -514,10 +519,18 @@ void handleConsole() {
   } else if (command.startsWith("playtext ") && command.length() > 9) {
     const String text = command.substring(9);
     if (text.length()) { Serial.printf("[vio] playtext: %s\n", text.c_str()); queueSpeak(text); }
+  } else if (command == "nettest") {
+    Serial.printf("[vio] resolving %s ...\n", MIMO_HOST);
+    IPAddress ip;
+    if (WiFi.hostByName(MIMO_HOST, ip)) Serial.printf("[vio] DNS ok: %s\n", ip.toString().c_str());
+    else Serial.println("[vio] DNS failed");
+    { WiFiClientSecure tls; tls.setInsecure(); tls.setTimeout(15);
+      if (tls.connect(MIMO_HOST, MIMO_PORT)) { Serial.println("[vio] TLS connect ok"); tls.stop(); }
+      else Serial.println("[vio] TLS connect failed"); }
   } else if (command == "status") {
     printStatus();
   } else if (command == "help") {
-    Serial.println("[vio] commands: mimokey <key>, clear-mimokey, pcip <ip> [port], ttsvoice <name>, playtext <text>, status, help");
+    Serial.println("[vio] commands: mimokey <key>, clear-mimokey, pcip <ip> [port], ttsvoice <name>, playtext <text>, nettest, status, help");
   } else if (command.length()) {
     Serial.println("[vio] unknown command; type help");
   }
@@ -526,8 +539,8 @@ void handleConsole() {
 }  // namespace
 
 void setup() {
-  Serial.begin(115200, SERIAL_8N1, 44, 43);
-  delay(300);
+  Serial.begin(115200);
+  delay(500);  // let USB CDC enumerate before the first log line
   configureBootButton();
   lastRawPressed = digitalRead(BOOT_PIN) == LOW;
   stablePressed = lastRawPressed;

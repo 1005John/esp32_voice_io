@@ -71,7 +71,7 @@ constexpr size_t MAX_RECORD_BYTES = MIC_SAMPLE_RATE * (MIC_BITS / 8) * MAX_RECOR
 constexpr uint32_t MIN_RECORD_BYTES = MIC_SAMPLE_RATE * (MIC_BITS / 8) / 3;
 constexpr uint32_t DEBOUNCE_MS = 35, WIFI_RETRY_MS = 10000;
 constexpr size_t SPEAKER_FRAMES_PER_WRITE = 512;
-constexpr uint8_t SPEAKER_VOLUME_PERCENT = 20;
+constexpr uint8_t SPEAKER_VOLUME_PERCENT = 10;
 // Cap for downloaded TTS PCM (kept in PSRAM, played after Wi-Fi is paused).
 constexpr size_t MAX_REPLY_AUDIO_BYTES = 2 * 1024 * 1024;
 constexpr size_t MAX_B64_LINE = 65536;

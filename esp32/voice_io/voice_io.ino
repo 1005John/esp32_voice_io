@@ -147,8 +147,8 @@ void installSpeaker() {
     .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 8, .dma_buf_len = 256,
-    .use_apll = false, .tx_desc_auto_clear = true, .fixed_mclk = 0,
+    .dma_buf_count = 8, .dma_buf_len = 512,
+    .use_apll = true, .tx_desc_auto_clear = true, .fixed_mclk = 0,
   };
   const i2s_pin_config_t pins = {
     .bck_io_num = SPEAKER_BCLK_PIN, .ws_io_num = SPEAKER_WS_PIN,
@@ -532,7 +532,7 @@ void handleSpeak() {
   if (!server.hasArg("plain")) { server.send(400, "application/json", "{\"ok\":false,\"error\":\"no body\"}"); return; }
   const String body = server.arg("plain");
   const String text = jsonStringField(body, "text");
-  Serial.printf("[vio] /speak received %u chars: %.80s\n", (unsigned)text.length(), text.c_str());
+  Serial.printf("[vio] /speak received %u chars: %s\n", (unsigned)text.length(), text.c_str());
   if (text.length() == 0) { server.send(400, "application/json", "{\"ok\":false,\"error\":\"no text\"}"); return; }
   if (voiceJobActive) { Serial.println("[vio] /speak busy (409)"); server.send(409, "application/json", "{\"ok\":false,\"busy\":true}"); return; }
   queueSpeak(text);

@@ -151,6 +151,8 @@ ESP_PORT = 8766
 DIFY_URL = None
 DIFY_KEY = None
 DIFY_USERNAME = "voice"
+MIMO_URL = "https://token-plan-cn.xiaomimimo.com/v1"
+MIMO_KEY = None
 _asr_buf = []
 _asr_lock = threading.Lock()
 
@@ -202,15 +204,47 @@ def dify_chat(query):
                         full += ans
                         type_text(ans)  # stream answer into the focus box
                 elif ev == "message_end":
-                    if full:
-                        forward_speak(full)  # TTS the whole answer
                     print(f"[agent] dify answer {len(full)} chars: {full[:60]!r}",
                           file=sys.stderr)
+                    summary = mimo_pro_summarize(full) if full else ""
+                    forward_speak(summary if summary else full)
                     return
         if full:
             forward_speak(full)
     except Exception as e:
         print(f"[agent] dify error: {e}", file=sys.stderr)
+
+
+def mimo_pro_summarize(text):
+    """Summarize text to <=30 chars via MiMo v2.5-pro for short TTS playback."""
+    if not MIMO_KEY or not text:
+        return ""
+    body = json.dumps({
+        "model": "mimo-v2.5-pro",
+        "messages": [
+            {"role": "system",
+             "content": "将以下内容总结成不超过30个字的简短口语化回复，保留关键信息，不要加引号或前缀。"},
+            {"role": "user", "content": text}
+        ],
+        "stream": False
+    }, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        MIMO_URL.rstrip("/") + "/chat/completions",
+        data=body,
+        headers={"Authorization": "Bearer " + MIMO_KEY,
+                 "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        r = urllib.request.urlopen(req, timeout=40)
+        obj = json.loads(r.read().decode("utf-8"))
+        s = (obj.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
+        print(f"[agent] mimo-pro summary {len(s)} chars: {s[:40]!r}",
+              file=sys.stderr)
+        return s
+    except Exception as e:
+        print(f"[agent] mimo-pro error: {e}", file=sys.stderr)
+        return ""
 
 
 def forward_speak(text):
@@ -296,10 +330,13 @@ def main():
                     help="Dify app API key (app-...)")
     ap.add_argument("--dify-user", default="voice",
                     help="Dify input form username (default: voice)")
+    ap.add_argument("--mimo-key", default="",
+                    help="MiMo API key for v2.5-pro summarization (tp-...)")
     args = ap.parse_args()
     DIFY_URL = args.dify_url or None
     DIFY_KEY = args.dify_key or None
     DIFY_USERNAME = args.dify_user
+    MIMO_KEY = args.mimo_key or None
     if ":" in args.esp:
         ESP_HOST, p = args.esp.split(":", 1)
         ESP_PORT = int(p)

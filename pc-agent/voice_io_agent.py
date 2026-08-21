@@ -214,7 +214,7 @@ def dify_chat(query):
 
 
 def forward_speak(text):
-    data = json.dumps({"text": text}).encode("utf-8")
+    data = json.dumps({"text": text}, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
         f"http://{ESP_HOST}:{ESP_PORT}/speak",
         data=data,

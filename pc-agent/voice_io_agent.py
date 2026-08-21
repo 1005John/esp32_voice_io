@@ -322,7 +322,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global ESP_HOST, ESP_PORT, DIFY_URL, DIFY_KEY, DIFY_USERNAME
+    global ESP_HOST, ESP_PORT, DIFY_URL, DIFY_KEY, DIFY_USERNAME, MIMO_KEY
     ap = argparse.ArgumentParser(description="esp32_voice_io PC agent")
     ap.add_argument("--listen", type=int, default=8765,
                     help="HTTP listen port (default 8765)")

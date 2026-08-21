@@ -263,7 +263,6 @@ class Handler(BaseHTTPRequestHandler):
                 if text:
                     _asr_buf.append(text)
                 if enter:
-                    mac_press_key(36)  # Return: submit the ASR sentence
                     query = "".join(_asr_buf)
                     _asr_buf.clear()
                 else:

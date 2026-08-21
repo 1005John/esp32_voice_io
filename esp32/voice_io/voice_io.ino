@@ -268,8 +268,10 @@ void forwardAsrToPc(const String& text, bool sendEnter) {
       "\r\nContent-Type: application/json\r\nContent-Length: " + String(body.length()) +
       "\r\nConnection: close\r\n\r\n";
   if (writeAll(c, req)) writeAll(c, body);
-  const uint32_t d = millis() + 1500;
-  while (c.connected() && static_cast<int32_t>(d - millis()) > 0) { while (c.available()) c.read(); delay(1); }
+  // Fire-and-forget: the body is already in the TCP send buffer, so we don't
+  // wait for the PC's HTTP response. This saves ~1.5s per delta and keeps
+  // streaming text low-latency. Closing sends FIN; the agent reads to EOF.
+  delay(20);
   c.stop();
 }
 

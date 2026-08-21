@@ -108,6 +108,7 @@ void configureBootButton() { pinMode(BOOT_PIN, INPUT_PULLUP); }
 void connectWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_11dBm);  // lower TX current to ease USB brownout
   if (strlen(WIFI_PASSWORD) == 0) WiFi.begin(WIFI_SSID);
   else WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   lastWifiAttemptMs = millis();

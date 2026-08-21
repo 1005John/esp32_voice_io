@@ -109,6 +109,7 @@ void configureBootButton() { pinMode(BOOT_PIN, INPUT_PULLUP); }
 void connectWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_11dBm);  // lower TX current to ease USB brownout
   if (strlen(WIFI_PASSWORD) == 0) WiFi.begin(WIFI_SSID);
   else WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   lastWifiAttemptMs = millis();
@@ -565,11 +566,11 @@ void handleConsole() {
 
 }  // namespace
 
-#line 567 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
+#line 568 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
 void setup();
-#line 596 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
+#line 597 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
 void loop();
-#line 567 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
+#line 568 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
 void setup() {
   Serial.begin(115200);
   delay(500);  // let USB CDC enumerate before the first log line

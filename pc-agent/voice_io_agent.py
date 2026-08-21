@@ -24,6 +24,7 @@ import sys
 import urllib.request
 import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import threading
 
 # --------------------------------------------------------------------------- #
 # Keyboard Unicode inject
@@ -147,6 +148,70 @@ def type_text(text):
 ESP_HOST = None
 ESP_PORT = 8766
 
+DIFY_URL = None
+DIFY_KEY = None
+DIFY_USERNAME = "voice"
+_asr_buf = []
+_asr_lock = threading.Lock()
+
+
+def dify_chat(query):
+    """Send query to Dify /chat-messages (streaming); inject answer into the
+    focus box (so the user sees it) and forward the whole answer to ESP32 TTS."""
+    if not DIFY_URL or not DIFY_KEY or not query:
+        return
+    body = json.dumps({
+        "query": query,
+        "inputs": {"username": DIFY_USERNAME},
+        "response_mode": "streaming",
+        "conversation_id": "",
+        "user": "esp32-voice",
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        DIFY_URL.rstrip("/") + "/chat-messages",
+        data=body,
+        headers={"Authorization": "Bearer " + DIFY_KEY,
+                 "Content-Type": "application/json"},
+        method="POST",
+    )
+    full = ""
+    try:
+        r = urllib.request.urlopen(req, timeout=90)
+        buf = ""
+        while True:
+            chunk = r.read(2048)
+            if not chunk:
+                break
+            buf += chunk.decode("utf-8", "replace")
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                line = line.strip()
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if not payload:
+                    continue
+                try:
+                    obj = json.loads(payload)
+                except Exception:
+                    continue
+                ev = obj.get("event")
+                if ev == "message":
+                    ans = obj.get("answer", "") or ""
+                    if ans:
+                        full += ans
+                        type_text(ans)  # stream answer into the focus box
+                elif ev == "message_end":
+                    if full:
+                        forward_speak(full)  # TTS the whole answer
+                    print(f"[agent] dify answer {len(full)} chars: {full[:60]!r}",
+                          file=sys.stderr)
+                    return
+        if full:
+            forward_speak(full)
+    except Exception as e:
+        print(f"[agent] dify error: {e}", file=sys.stderr)
+
 
 def forward_speak(text):
     data = json.dumps({"text": text}).encode("utf-8")
@@ -194,10 +259,19 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/asr":
             enter = bool(obj.get("enter", False))
             ok = type_text(text)
-            if ok and enter:
-                mac_press_key(36)  # Return only when the sentence ends
+            with _asr_lock:
+                if text:
+                    _asr_buf.append(text)
+                if enter:
+                    mac_press_key(36)  # Return: submit the ASR sentence
+                    query = "".join(_asr_buf)
+                    _asr_buf.clear()
+                else:
+                    query = ""
+            if enter and query and DIFY_URL:
+                threading.Thread(target=dify_chat, args=(query,), daemon=True).start()
             self._send_json(200 if ok else 500, {"ok": ok})
-            print(f"[agent] /asr typed {len(text)} chars: {text[:40]!r}",
+            print(f"[agent] /asr typed {len(text)} chars: {text[:40]!r} enter={enter}",
                   file=sys.stderr)
         elif self.path == "/speak":
             ok = forward_speak(text)
@@ -211,13 +285,22 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global ESP_HOST, ESP_PORT
+    global ESP_HOST, ESP_PORT, DIFY_URL, DIFY_KEY, DIFY_USERNAME
     ap = argparse.ArgumentParser(description="esp32_voice_io PC agent")
     ap.add_argument("--listen", type=int, default=8765,
                     help="HTTP listen port (default 8765)")
     ap.add_argument("--esp", required=True,
                     help="ESP32 address as IP[:port] (port default 8766)")
+    ap.add_argument("--dify-url", default="",
+                    help="Dify base URL, e.g. https://dify-ai.cmaiot.cn:42835/v1")
+    ap.add_argument("--dify-key", default="",
+                    help="Dify app API key (app-...)")
+    ap.add_argument("--dify-user", default="voice",
+                    help="Dify input form username (default: voice)")
     args = ap.parse_args()
+    DIFY_URL = args.dify_url or None
+    DIFY_KEY = args.dify_key or None
+    DIFY_USERNAME = args.dify_user
     if ":" in args.esp:
         ESP_HOST, p = args.esp.split(":", 1)
         ESP_PORT = int(p)

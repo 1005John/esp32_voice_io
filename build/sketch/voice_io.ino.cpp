@@ -222,8 +222,25 @@ String jsonStringField(const String& j, const char* field) {
   int p = s + 1;
   while (p < (int)j.length() && (j[p] == ' ' || j[p] == '\t')) ++p;
   if (p >= (int)j.length() || j[p] != '"') return "";  // null / number / bool
-  const int e = j.indexOf('"', p + 1);
-  return e < 0 ? "" : j.substring(p + 1, e);
+  String out;
+  for (int i = p + 1; i < (int)j.length(); ++i) {
+    const char c = j[i];
+    if (c == '\\') {
+      if (++i >= (int)j.length()) break;
+      const char n = j[i];
+      if (n == 'n') out += '\n';
+      else if (n == 'r') out += '\r';
+      else if (n == 't') out += '\t';
+      else if (n == '"') out += '"';
+      else if (n == '\\') out += '\\';
+      else out += n;
+    } else if (c == '"') {
+      break;  // end of JSON string
+    } else {
+      out += c;
+    }
+  }
+  return out;
 }
 String jsonEscape(const String& s) {
   String out; out.reserve(s.length() + 8);
@@ -516,8 +533,9 @@ void handleSpeak() {
   if (!server.hasArg("plain")) { server.send(400, "application/json", "{\"ok\":false,\"error\":\"no body\"}"); return; }
   const String body = server.arg("plain");
   const String text = jsonStringField(body, "text");
+  Serial.printf("[vio] /speak received %u chars: %.80s\n", (unsigned)text.length(), text.c_str());
   if (text.length() == 0) { server.send(400, "application/json", "{\"ok\":false,\"error\":\"no text\"}"); return; }
-  if (voiceJobActive) { server.send(409, "application/json", "{\"ok\":false,\"busy\":true}"); return; }
+  if (voiceJobActive) { Serial.println("[vio] /speak busy (409)"); server.send(409, "application/json", "{\"ok\":false,\"busy\":true}"); return; }
   queueSpeak(text);
   server.send(200, "application/json", "{\"ok\":true,\"queued\":true}");
 }
@@ -579,11 +597,11 @@ void handleConsole() {
 
 }  // namespace
 
-#line 581 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
+#line 599 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
 void setup();
-#line 610 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
+#line 628 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
 void loop();
-#line 581 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
+#line 599 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
 void setup() {
   Serial.begin(115200);
   delay(500);  // let USB CDC enumerate before the first log line

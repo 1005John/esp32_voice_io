@@ -65,7 +65,7 @@ constexpr i2s_port_t SPEAKER_PORT = I2S_NUM_1;
 constexpr int SPEAKER_DATA_PIN = 7, SPEAKER_BCLK_PIN = 15, SPEAKER_WS_PIN = 16;
 constexpr uint32_t MIC_SAMPLE_RATE = 16000;
 constexpr uint32_t SPEAKER_SAMPLE_RATE = 24000;
-constexpr uint16_t MIC_BITS = 32;
+constexpr uint16_t MIC_BITS = 16;
 constexpr uint8_t CHANNELS = 1;
 constexpr uint32_t MAX_RECORD_SECONDS = 12;
 constexpr size_t MAX_RECORD_BYTES = MIC_SAMPLE_RATE * (MIC_BITS / 8) * MAX_RECORD_SECONDS;
@@ -109,7 +109,7 @@ void configureBootButton() { pinMode(BOOT_PIN, INPUT_PULLUP); }
 void connectWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.setTxPower(WIFI_POWER_11dBm);  // lower TX current to ease USB brownout
+  WiFi.setTxPower(WIFI_POWER_11dBm);  // 17dBm browns out; 16-bit audio halves data so 11dBm is fast enough
   if (strlen(WIFI_PASSWORD) == 0) WiFi.begin(WIFI_SSID);
   else WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   lastWifiAttemptMs = millis();
@@ -293,11 +293,13 @@ void uploadAsrAndForward() {
   const size_t b64Cap = (wavBytes + 2) / 3 * 4 + 1;
   uint8_t* b64 = static_cast<uint8_t*>(ps_malloc(b64Cap));
   if (!b64) { free(wav); Serial.println("[vio] base64 alloc failed"); return; }
+  uint32_t t0 = millis();
   size_t b64Len = 0;
   if (mbedtls_base64_encode(b64, b64Cap, &b64Len, wav, wavBytes) != 0) {
     free(wav); free(b64); Serial.println("[vio] base64 encode failed"); return;
   }
   free(wav);
+  Serial.printf("[vio] ASR base64 %u->%u B (%ums)\n", (unsigned)wavBytes, (unsigned)b64Len, millis()-t0);
 
   WiFiClientSecure tls;
   tls.setInsecure();
@@ -316,9 +318,10 @@ void uploadAsrAndForward() {
     Serial.println("[vio] ASR write failed"); tls.stop(); free(b64); return;
   }
   free(b64);
-  Serial.printf("[vio] ASR uploaded %.1f KiB; reading SSE\n", wavBytes / 1024.0f);
+  Serial.printf("[vio] ASR uploaded %.1f KiB (%ums); reading SSE\n", wavBytes / 1024.0f, millis()-t0);
 
   if (!readResponseHeaders(tls)) { Serial.println("[vio] ASR HTTP error"); tls.stop(); return; }
+  Serial.printf("[vio] ASR resp headers %ums\n", millis()-t0);
   String line;
   line.reserve(MAX_B64_LINE);
   size_t forwarded = 0;
@@ -331,7 +334,10 @@ void uploadAsrAndForward() {
           String payload = line.substring(5); payload.trim();
           if (payload != "[DONE]") {
             const String delta = jsonStringField(payload, "content");
-            if (delta.length()) { forwardAsrToPc(delta, false); ++forwarded; }
+            if (delta.length()) {
+              if (forwarded == 0) Serial.printf("[vio] ASR first delta %ums\n", millis()-t0);
+              forwardAsrToPc(delta, false); ++forwarded;
+            }
           }
         }
         line = "";
@@ -473,10 +479,17 @@ void beginRecording() {
 }
 void captureAudio() {
   if (!recording || recordedBytes >= MAX_RECORD_BYTES) return;
+  int32_t tmp[512];
   size_t read = 0;
-  const size_t space = MAX_RECORD_BYTES - recordedBytes;
-  const esp_err_t r = i2s_read(MIC_PORT, recordingBuffer + recordedBytes, min(space, static_cast<size_t>(4096)), &read, pdMS_TO_TICKS(20));
-  if (r == ESP_OK && read > 0) recordedBytes += read;
+  const size_t space16 = (MAX_RECORD_BYTES - recordedBytes) / 2;
+  const size_t want = min(space16, static_cast<size_t>(512));
+  const esp_err_t r = i2s_read(MIC_PORT, tmp, want * 4, &read, pdMS_TO_TICKS(20));
+  if (r == ESP_OK && read > 0) {
+    const size_t nsamp = read / 4;
+    int16_t* dst = reinterpret_cast<int16_t*>(recordingBuffer + recordedBytes);
+    for (size_t i = 0; i < nsamp; i++) dst[i] = static_cast<int16_t>(tmp[i] >> 16);
+    recordedBytes += nsamp * 2;
+  }
   if (recordedBytes >= MAX_RECORD_BYTES) { recording = false; updateLed(); Serial.println("[vio] max recording length reached"); queueAsrUpload(); }
 }
 void finishRecording() {
@@ -566,11 +579,11 @@ void handleConsole() {
 
 }  // namespace
 
-#line 568 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
+#line 581 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
 void setup();
-#line 597 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
+#line 610 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
 void loop();
-#line 568 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
+#line 581 "/Users/john/Documents/esp32_voice_io/esp32/voice_io/voice_io.ino"
 void setup() {
   Serial.begin(115200);
   delay(500);  // let USB CDC enumerate before the first log line

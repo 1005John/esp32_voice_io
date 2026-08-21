@@ -1,0 +1,2 @@
+#!/bin/bash
+exec /opt/homebrew/bin/python3.11 "/Users/john/Documents/esp32_voice_io/pc-agent/voice_io_agent.py" "$@" >/tmp/agent.log 2>&1

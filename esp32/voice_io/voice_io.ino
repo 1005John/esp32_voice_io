@@ -217,10 +217,11 @@ String jsonStringField(const String& j, const char* field) {
   if (s < 0) return "";
   s = j.indexOf(':', s + key.length());
   if (s < 0) return "";
-  s = j.indexOf('"', s + 1);
-  if (s < 0) return "";
-  const int e = j.indexOf('"', s + 1);
-  return e < 0 ? "" : j.substring(s + 1, e);
+  int p = s + 1;
+  while (p < (int)j.length() && (j[p] == ' ' || j[p] == '\t')) ++p;
+  if (p >= (int)j.length() || j[p] != '"') return "";  // null / number / bool
+  const int e = j.indexOf('"', p + 1);
+  return e < 0 ? "" : j.substring(p + 1, e);
 }
 String jsonEscape(const String& s) {
   String out; out.reserve(s.length() + 8);

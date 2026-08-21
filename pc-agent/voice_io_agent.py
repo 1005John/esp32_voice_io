@@ -65,6 +65,11 @@ def _mac_init():
 def mac_type(text):
     cg = _mac_init()
     # kCGEventSourceStateHIDSystemState = 1; kCGHIDEventTap = 0
+    try:
+        AppSvc = ctypes.CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+        print(f"[agent] AXIsProcessTrusted={bool(AppSvc.AXIsProcessTrusted())}", file=sys.stderr)
+    except Exception as e:
+        print(f"[agent] trust check error: {e}", file=sys.stderr)
     src = cg.CGEventSourceCreate(1)
     if not src:
         print("[agent] no CGEventSource (grant Accessibility permission)",
@@ -84,6 +89,20 @@ def mac_type(text):
             if evup:
                 cg.CGEventKeyboardSetUnicodeString(evup, n, buf)
                 cg.CGEventPost(0, evup)
+    return True
+
+
+def mac_press_key(keycode):
+    cg = _mac_init()
+    src = cg.CGEventSourceCreate(1)
+    if not src:
+        return False
+    ev = cg.CGEventCreateKeyboardEvent(src, keycode, True)
+    if ev:
+        cg.CGEventPost(0, ev)
+    evup = cg.CGEventCreateKeyboardEvent(src, keycode, False)
+    if evup:
+        cg.CGEventPost(0, evup)
     return True
 
 
@@ -174,6 +193,8 @@ class Handler(BaseHTTPRequestHandler):
         text = obj.get("text", "") or ""
         if self.path == "/asr":
             ok = type_text(text)
+            if ok:
+                mac_press_key(36)  # Return key -> auto-submit after text
             self._send_json(200 if ok else 500, {"ok": ok})
             print(f"[agent] /asr typed {len(text)} chars: {text[:40]!r}",
                   file=sys.stderr)

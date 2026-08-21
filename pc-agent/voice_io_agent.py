@@ -192,9 +192,10 @@ class Handler(BaseHTTPRequestHandler):
             obj = {}
         text = obj.get("text", "") or ""
         if self.path == "/asr":
+            enter = bool(obj.get("enter", False))
             ok = type_text(text)
-            if ok:
-                mac_press_key(36)  # Return key -> auto-submit after text
+            if ok and enter:
+                mac_press_key(36)  # Return only when the sentence ends
             self._send_json(200 if ok else 500, {"ok": ok})
             print(f"[agent] /asr typed {len(text)} chars: {text[:40]!r}",
                   file=sys.stderr)

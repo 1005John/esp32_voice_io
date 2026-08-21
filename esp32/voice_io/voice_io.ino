@@ -257,12 +257,13 @@ bool readResponseHeaders(WiFiClient& c, uint32_t timeoutMs = 15000) {
   return false;
 }
 
-void forwardAsrToPc(const String& text) {
-  if (text.length() == 0 || WiFi.status() != WL_CONNECTED || pcHost.length() == 0) return;
+void forwardAsrToPc(const String& text, bool sendEnter) {
+  if (WiFi.status() != WL_CONNECTED || pcHost.length() == 0) return;
+  if (text.length() == 0 && !sendEnter) return;
   WiFiClient c;
   c.setTimeout(2000);
   if (!c.connect(pcHost.c_str(), pcPort)) { Serial.println("[vio] cannot reach PC /asr"); return; }
-  const String body = "{\"text\":\"" + jsonEscape(text) + "\"}";
+  const String body = "{\"text\":\"" + jsonEscape(text) + "\",\"enter\":" + (sendEnter ? "true" : "false") + "}";
   const String req = "POST /asr HTTP/1.1\r\nHost: " + pcHost + ":" + String(pcPort) +
       "\r\nContent-Type: application/json\r\nContent-Length: " + String(body.length()) +
       "\r\nConnection: close\r\n\r\n";
@@ -326,7 +327,7 @@ void uploadAsrAndForward() {
           String payload = line.substring(5); payload.trim();
           if (payload != "[DONE]") {
             const String delta = jsonStringField(payload, "content");
-            if (delta.length()) { forwardAsrToPc(delta); ++forwarded; }
+            if (delta.length()) { forwardAsrToPc(delta, false); ++forwarded; }
           }
         }
         line = "";
@@ -339,6 +340,7 @@ void uploadAsrAndForward() {
   }
   tls.stop();
   Serial.printf("[vio] ASR done; forwarded %u deltas\n", (unsigned)forwarded);
+  if (forwarded > 0) { forwardAsrToPc("", true); Serial.println("[vio] ASR sentence end -> PC Enter"); }
 }
 
 // Decode every TTS audio chunk to PSRAM; Wi-Fi is paused during playback to

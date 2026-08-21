@@ -217,6 +217,7 @@ def dify_chat(query):
 
 def mimo_pro_summarize(text):
     """Summarize text to <=30 chars via MiMo v2.5-pro for short TTS playback."""
+    print(f"[agent] mimo-pro called: MIMO_KEY={'set' if MIMO_KEY else 'None'} text={len(text)} chars", file=sys.stderr)
     if not MIMO_KEY or not text:
         return ""
     body = json.dumps({
@@ -236,8 +237,11 @@ def mimo_pro_summarize(text):
         method="POST",
     )
     try:
+        print("[agent] mimo-pro urlopen...", file=sys.stderr)
         r = urllib.request.urlopen(req, timeout=40)
-        obj = json.loads(r.read().decode("utf-8"))
+        raw = r.read().decode("utf-8")
+        print(f"[agent] mimo-pro got {len(raw)} bytes", file=sys.stderr)
+        obj = json.loads(raw)
         s = (obj.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
         print(f"[agent] mimo-pro summary {len(s)} chars: {s[:40]!r}",
               file=sys.stderr)
